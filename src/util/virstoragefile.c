@@ -1809,22 +1809,50 @@ virStorageSourcePoolDefCopy(const virStorageSourcePoolDef *src)
 }
 
 
+/**
+ * virStorageSourceGetBackingStore:
+ * @src: virStorageSourcePtr containing the backing stores
+ * @pos: position of the backing store to get
+ *
+ * return the backingStore at the position of @pos
+ */
 virStorageSourcePtr
-virStorageSourceGetBackingStore(const virStorageSource *src,
-                                size_t pos ATTRIBUTE_UNUSED)
+virStorageSourceGetBackingStore(const virStorageSource *src, size_t pos)
 {
-    if (!src)
+    if (!src || !src->backingStores || pos >= src->nBackingStores)
         return NULL;
-    return src->backingStore;
+    return src->backingStores[pos];
 }
 
 
+/**
+ * virStorageSourceSetBackingStore:
+ * @src: virStorageSourcePtr to hold @backingStore
+ * @backingStore: backingStore to store
+ * @pos: position of the backing store to store
+ *
+ * Set @backingStore at @pos in src->backingStores.
+ * If src->backingStores don't have the space to contain
+ * @backingStore, we expand src->backingStores.
+ * If src->backingStores[pos] is alerady set, free it.
+ */
 int
 virStorageSourceSetBackingStore(virStorageSourcePtr src,
                                 virStorageSourcePtr backingStore,
-                                size_t pos ATTRIBUTE_UNUSED)
+                                size_t pos)
 {
-    src->backingStore = backingStore;
+    if (!src)
+        return -1;
+
+    if (pos >= src->nBackingStores) {
+        int nbr = pos - src->nBackingStores + 1;
+        if (VIR_EXPAND_N(src->backingStores, src->nBackingStores, nbr) < 0)
+            return -1;
+    }
+
+    if (src->backingStores[pos])
+        virStorageSourceFree(src->backingStores[pos]);
+    src->backingStores[pos] = backingStore;
     return 0;
 }
 
@@ -1843,6 +1871,7 @@ virStorageSourceCopy(const virStorageSource *src,
                      bool backingChain)
 {
     virStorageSourcePtr ret = NULL;
+    size_t i;
 
     if (VIR_ALLOC(ret) < 0)
         return NULL;
@@ -1855,6 +1884,8 @@ virStorageSourceCopy(const virStorageSource *src,
     ret->physical = src->physical;
     ret->readonly = src->readonly;
     ret->shared = src->shared;
+    ret->nBackingStores = src->nBackingStores;
+    ret->threshold = src->threshold;
 
     /* storage driver metadata are not copied */
     ret->drv = NULL;
@@ -1903,12 +1934,14 @@ virStorageSourceCopy(const virStorageSource *src,
         !(ret->auth = virStorageAuthDefCopy(src->auth)))
         goto error;
 
-    if (backingChain && virStorageSourceGetBackingStore(src, 0)) {
-        if (virStorageSourceSetBackingStore(ret,
-                                            virStorageSourceCopy(virStorageSourceGetBackingStore(src, 0),
-                                                                 true),
-                                             0) < 0)
-            goto error;
+    for (i = 0; i < src->nBackingStores; ++i) {
+        if (backingChain && virStorageSourceGetBackingStore(src, i)) {
+            if (virStorageSourceSetBackingStore(ret,
+                                                virStorageSourceCopy(virStorageSourceGetBackingStore(src, i),
+                                                                     true),
+                                                0) < 0)
+                goto error;
+        }
     }
 
     return ret;
@@ -2040,6 +2073,8 @@ virStorageSourceIsEmpty(virStorageSourcePtr src)
 void
 virStorageSourceBackingStoreClear(virStorageSourcePtr def)
 {
+    size_t i;
+
     if (!def)
         return;
 
@@ -2047,8 +2082,11 @@ virStorageSourceBackingStoreClear(virStorageSourcePtr def)
     VIR_FREE(def->backingStoreRaw);
 
     /* recursively free backing chain */
-    virStorageSourceFree(virStorageSourceGetBackingStore(def, 0));
-    ignore_value(virStorageSourceSetBackingStore(def, NULL, 0));
+    for (i = 0; i < def->nBackingStores; ++i)
+        virStorageSourceFree(virStorageSourceGetBackingStore(def, i));
+    if (def->nBackingStores > 0)
+        VIR_FREE(def->backingStores);
+    def->nBackingStores = 0;
 }
 
 
