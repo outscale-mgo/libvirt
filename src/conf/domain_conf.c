@@ -6444,17 +6444,45 @@ virDomainDiskSourceParse(xmlNodePtr node,
 
 
 static int
+virDomainDiskThresholdParse(virStorageSourcePtr src,
+                            xmlXPathContextPtr ctxt)
+{
+    char *threshold = virXPathString("string(./@threshold)", ctxt);
+    int ret;
+
+    if (!threshold)
+        return 0;
+    ret = virStrToLong_ul(threshold, NULL, 10, &src->threshold);
+    if (ret < 0 || src->threshold < 2) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("threshold must be a decimal number greater than 2 "
+                         "and less than the number of children"));
+        VIR_FREE(threshold);
+        return -1;
+    }
+    VIR_FREE(threshold);
+    return 0;
+}
+
+#define VIR_DOMAIN_DISK_BACKING_STORE_PARSE_RECALL 1
+
+static int
 virDomainDiskBackingStoreParse(xmlXPathContextPtr ctxt,
-                               virStorageSourcePtr src)
+                               virStorageSourcePtr src,
+                               size_t pos)
 {
     virStorageSourcePtr backingStore = NULL;
     xmlNodePtr save_ctxt = ctxt->node;
     xmlNodePtr source;
     char *type = NULL;
     char *format = NULL;
+    char *path;
     int ret = -1;
 
-    if (!(ctxt->node = virXPathNode("./backingStore[*]", ctxt))) {
+    if (virAsprintf(&path, "./backingStore[%lu][*]", pos + 1) < 0)
+        return -1;
+
+    if (!(ctxt->node = virXPathNode(path, ctxt))) {
         ret = 0;
         goto cleanup;
     }
@@ -6488,29 +6516,35 @@ virDomainDiskBackingStoreParse(xmlXPathContextPtr ctxt,
         goto cleanup;
     }
 
-    if (!(source = virXPathNode("./source", ctxt))) {
-        virReportError(VIR_ERR_XML_ERROR, "%s",
-                       _("missing disk backing store source"));
-        goto cleanup;
-    }
+    source = virXPathNode("./source", ctxt);
 
-    if (virDomainDiskSourceParse(source, ctxt, backingStore) < 0 ||
-        virDomainDiskBackingStoreParse(ctxt, backingStore) < 0)
+    if (source && virDomainDiskSourceParse(source, ctxt, backingStore) < 0)
         goto cleanup;
 
-    if (virStorageSourceSetBackingStore(src, backingStore, 0) < 0)
+    if (virDomainDiskBackingStoreParse(ctxt, backingStore, 0) < 0)
         goto cleanup;
-    ret = 0;
+
+    if (virDomainDiskThresholdParse(backingStore, ctxt) < 0)
+        goto cleanup;
+
+    if (virStorageSourceSetBackingStore(src, backingStore, pos) < 0)
+        goto cleanup;
+
+    ret = VIR_DOMAIN_DISK_BACKING_STORE_PARSE_RECALL;
 
  cleanup:
     if (ret < 0)
         virStorageSourceFree(backingStore);
+    VIR_FREE(path);
     VIR_FREE(type);
     VIR_FREE(format);
     ctxt->node = save_ctxt;
-    return ret;
+    if (ret != VIR_DOMAIN_DISK_BACKING_STORE_PARSE_RECALL)
+        return ret;
+    return virDomainDiskBackingStoreParse(ctxt, src, pos + 1);
 }
 
+#undef VIR_DOMAIN_DISK_BACKING_STORE_PARSE_RECALL
 
 #define VENDOR_LEN  8
 #define PRODUCT_LEN 16
@@ -7040,12 +7074,16 @@ virDomainDiskDefParseXML(virDomainXMLOptionPtr xmlopt,
         def->device = VIR_DOMAIN_DISK_DEVICE_DISK;
     }
 
+    if (virDomainDiskThresholdParse(def->src, ctxt) < 0)
+        goto error;
+
     /* Only CDROM and Floppy devices are allowed missing source path
      * to indicate no media present. LUN is for raw access CD-ROMs
      * that are not attached to a physical device presently */
     if (virStorageSourceIsEmpty(def->src) &&
         (def->device == VIR_DOMAIN_DISK_DEVICE_DISK ||
-         (flags & VIR_DOMAIN_DEF_PARSE_DISK_SOURCE))) {
+         (flags & VIR_DOMAIN_DEF_PARSE_DISK_SOURCE)) &&
+        !(virStorageSourceIsRAID(def->src))) {
         virReportError(VIR_ERR_NO_SOURCE,
                        target ? "%s" : NULL, target);
         goto error;
@@ -7388,10 +7426,8 @@ virDomainDiskDefParseXML(virDomainXMLOptionPtr xmlopt,
         }
     }
 
-    if (!(flags & VIR_DOMAIN_DEF_PARSE_DISK_SOURCE)) {
-        if (virDomainDiskBackingStoreParse(ctxt, def->src) < 0)
-            goto error;
-    }
+    if (virDomainDiskBackingStoreParse(ctxt, def->src, 0) < 0)
+        goto error;
 
  cleanup:
     VIR_FREE(bus);
@@ -18769,12 +18805,14 @@ virDomainDiskSourceFormat(virBufferPtr buf,
 
 static int
 virDomainDiskBackingStoreFormat(virBufferPtr buf,
-                                virStorageSourcePtr backingStore,
-                                const char *backingStoreRaw,
-                                unsigned int idx)
+                                virStorageSourcePtr src,
+                                unsigned int *idx)
 {
+    const char *backingStoreRaw = src->backingStoreRaw;
+    virStorageSourcePtr backingStore = virStorageSourceGetBackingStore(src, 0);
     const char *type;
     const char *format;
+    size_t i;
 
     if (!backingStore) {
         if (!backingStoreRaw)
@@ -18782,37 +18820,48 @@ virDomainDiskBackingStoreFormat(virBufferPtr buf,
         return 0;
     }
 
-    if (!backingStore->type ||
-        !(type = virStorageTypeToString(backingStore->type))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected disk backing store type %d"),
-                       backingStore->type);
-        return -1;
+    for (i = 0; i < src->nBackingStores; ++i) {
+        backingStore = virStorageSourceGetBackingStore(src, i);
+
+        if (!backingStore) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("expected disk backing store"));
+            return -1;
+        }
+
+        if (!backingStore->type ||
+            !(type = virStorageTypeToString(backingStore->type))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("unexpected disk backing store type %d"),
+                           backingStore->type);
+            return -1;
+        }
+
+        if (backingStore->format <= 0 ||
+            !(format = virStorageFileFormatTypeToString(backingStore->format))) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("unexpected disk backing store format %d"),
+                           backingStore->format);
+            return -1;
+        }
+
+        *idx += 1;
+        virBufferAsprintf(buf, "<backingStore type='%s' index='%u'",
+                          type, *idx);
+        if (backingStore->threshold)
+            virBufferAsprintf(buf, " threshold='%lu'", backingStore->threshold);
+        virBufferAddLit(buf, ">\n");
+        virBufferAdjustIndent(buf, 2);
+
+        virBufferAsprintf(buf, "<format type='%s'/>\n", format);
+        /* We currently don't output seclabels for backing chain element */
+        if (virDomainDiskSourceFormatInternal(buf, backingStore, 0, 0, true) < 0 ||
+            virDomainDiskBackingStoreFormat(buf, backingStore, idx) < 0)
+            return -1;
+
+        virBufferAdjustIndent(buf, -2);
+        virBufferAddLit(buf, "</backingStore>\n");
     }
-
-    if (backingStore->format <= 0 ||
-        !(format = virStorageFileFormatTypeToString(backingStore->format))) {
-        virReportError(VIR_ERR_INTERNAL_ERROR,
-                       _("unexpected disk backing store format %d"),
-                       backingStore->format);
-        return -1;
-    }
-
-    virBufferAsprintf(buf, "<backingStore type='%s' index='%u'>\n",
-                      type, idx);
-    virBufferAdjustIndent(buf, 2);
-
-    virBufferAsprintf(buf, "<format type='%s'/>\n", format);
-    /* We currently don't output seclabels for backing chain element */
-    if (virDomainDiskSourceFormatInternal(buf, backingStore, 0, 0, true) < 0 ||
-        virDomainDiskBackingStoreFormat(buf,
-                                        virStorageSourceGetBackingStore(backingStore, 0),
-                                        backingStore->backingStoreRaw,
-                                        idx + 1) < 0)
-        return -1;
-
-    virBufferAdjustIndent(buf, -2);
-    virBufferAddLit(buf, "</backingStore>\n");
     return 0;
 }
 
@@ -18882,6 +18931,10 @@ virDomainDiskDefFormat(virBufferPtr buf,
           def->src->readonly))
         virBufferAsprintf(buf, " snapshot='%s'",
                           virDomainSnapshotLocationTypeToString(def->snapshot));
+    if (def->src->threshold) {
+        virBufferAsprintf(buf, " threshold='%lu'",
+                          def->src->threshold);
+    }
     virBufferAddLit(buf, ">\n");
     virBufferAdjustIndent(buf, 2);
 
@@ -18926,11 +18979,13 @@ virDomainDiskDefFormat(virBufferPtr buf,
 
     /* Don't format backingStore to inactive XMLs until the code for
      * persistent storage of backing chains is ready. */
-    if (!(flags & VIR_DOMAIN_DEF_FORMAT_INACTIVE) &&
-        virDomainDiskBackingStoreFormat(buf,
-                                        virStorageSourceGetBackingStore(def->src, 0),
-                                        def->src->backingStoreRaw, 1) < 0)
-        return -1;
+    if (!(flags & VIR_DOMAIN_DEF_FORMAT_INACTIVE) ||
+        virStorageSourceIsRAID(def->src)) {
+        unsigned int idx = 0;
+
+        if (virDomainDiskBackingStoreFormat(buf, def->src, &idx) < 0)
+            return -1;
+    }
 
     virBufferEscapeString(buf, "<backenddomain name='%s'/>\n", def->domain_name);
 
