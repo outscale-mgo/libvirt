@@ -296,8 +296,8 @@ struct _virStorageSource {
 bool virStorageSourceIsContener(virStorageSourcePtr src);
 
 bool virStorageSourceSetBackingStore(virStorageSourcePtr src,
-                                                    virStorageSourcePtr backingStore,
-                                                    size_t pos);
+                                     virStorageSourcePtr backingStore,
+                                     size_t pos);
 virStorageSourcePtr virStorageSourceGetBackingStore(const virStorageSource *src,
                                                     size_t pos);
 
