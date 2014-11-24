@@ -54,7 +54,8 @@ VIR_ENUM_IMPL(virStorage, VIR_STORAGE_TYPE_LAST,
               "block",
               "dir",
               "network",
-              "volume")
+              "volume",
+              "quorum")
 
 VIR_ENUM_IMPL(virStorageFileFormat,
               VIR_STORAGE_FILE_LAST,
@@ -63,7 +64,7 @@ VIR_ENUM_IMPL(virStorageFileFormat,
               "cloop", "dmg", "iso",
               "vpc", "vdi",
               /* Not direct file formats, but used for various drivers */
-              "fat", "vhd", "ploop",
+              "fat", "vhd", "ploop", "quorum",
               /* Formats with backing file below here */
               "cow", "qcow", "qcow2", "qed", "vmdk")
 
@@ -2052,6 +2053,9 @@ virStorageSourceIsLocalStorage(virStorageSourcePtr src)
     case VIR_STORAGE_TYPE_FILE:
     case VIR_STORAGE_TYPE_BLOCK:
     case VIR_STORAGE_TYPE_DIR:
+        /* A quorum is actually both, but we consider it as local
+         * because it keep us to add a lot of exeption in the code*/
+    case VIR_STORAGE_TYPE_QUORUM:
         return true;
 
     case VIR_STORAGE_TYPE_NETWORK:
