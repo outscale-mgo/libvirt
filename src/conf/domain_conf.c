@@ -6530,6 +6530,7 @@ virDomainDiskSourceParse(xmlNodePtr node,
         if (virDomainDiskSourcePoolDefParse(node, &src->srcpool) < 0)
             goto cleanup;
         break;
+    case VIR_STORAGE_TYPE_QUORUM:
     case VIR_STORAGE_TYPE_NONE:
     case VIR_STORAGE_TYPE_LAST:
         virReportError(VIR_ERR_INTERNAL_ERROR,
@@ -18790,6 +18791,7 @@ virDomainDiskSourceFormatInternal(virBufferPtr buf,
                                                  skipSeclabels);
             break;
 
+        case VIR_STORAGE_TYPE_QUORUM:
         case VIR_STORAGE_TYPE_NONE:
         case VIR_STORAGE_TYPE_LAST:
             virReportError(VIR_ERR_INTERNAL_ERROR,
