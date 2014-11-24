@@ -3612,6 +3612,91 @@ qemuCheckDiskConfig(virDomainDiskDefPtr disk)
     return -1;
 }
 
+static bool
+qemuBuildContenerFileSourceStr(virConnectPtr conn,
+                               virStorageSourcePtr src,
+                               virBuffer *opt,
+                               const char *toAppend)
+{
+    char *source = NULL;
+    int actualType = virStorageSourceGetActualType(src);
+
+    if (qemuGetDriveSourceString(src, conn, &source) < 0)
+        return false;
+
+    if (source) {
+
+        virBufferStrcat(opt, "," , toAppend , "filename=", NULL);
+
+        if (actualType == VIR_STORAGE_TYPE_DIR) {
+            virReportError(VIR_ERR_INTERNAL_ERROR,
+                           _("unsupported disk driver type for '%s'"),
+                           virStorageFileFormatTypeToString(src->format));
+            return false;
+        }
+        virBufferAdd(opt, source, -1);
+    }
+
+    return true;
+}
+
+
+static bool
+qemuBuildContenerStr(virConnectPtr conn,
+                     virDomainDiskDefPtr disk,
+                     virStorageSourcePtr src,
+                     virBuffer *opt,
+                     const char *toAppend)
+{
+    char *tmp = NULL;
+    int ret;
+    virStorageSourcePtr backingStore;
+    size_t i;
+
+    if (!src->threshold) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("threshold missing in the quorum configuration"));
+        return false;
+    }
+    if (src->nBackingStores < 2) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("a quorum must have at last 2 children"));
+        return false;
+    }
+    if (src->threshold > src->nBackingStores) {
+        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                       _("threshold must not exceed the number of children"));
+        return false;
+    }
+    virBufferAsprintf(opt, ",%svote-threshold=%lu",
+                      toAppend, src->threshold);
+    for (i = 0;  i < src->nBackingStores; ++i) {
+        backingStore = virStorageSourceGetBackingStore(src, i);
+        ret = virAsprintf(&tmp, "%schildren.%lu.file.", toAppend, i);
+        if (ret < 0)
+            return false;
+
+        virBufferAsprintf(opt, ",%schildren.%lu.driver=%s",
+                          toAppend, i,
+                          virStorageFileFormatTypeToString(backingStore->format));
+
+        if (qemuBuildContenerFileSourceStr(conn, backingStore, opt, tmp) == false)
+            goto error;
+
+        /* This operation avoid us to made another copy */
+        tmp[ret - sizeof("file")] = '\0';
+        if (virStorageSourceIsContener(backingStore)) {
+            if (!qemuBuildContenerStr(conn, disk, backingStore, opt, tmp))
+                goto error;
+        }
+        VIR_FREE(tmp);
+    }
+    return true;
+ error:
+    VIR_FREE(tmp);
+    return false;
+}
+
 
 /* Check whether the device address is using either 'ccw' or default s390
  * address format and whether that's "legal" for the current qemu and/or
@@ -3781,6 +3866,7 @@ qemuBuildDriveStr(virConnectPtr conn,
         goto error;
 
     if (source &&
+        !virStorageSourceIsContener(disk->src) &&
         !((disk->device == VIR_DOMAIN_DISK_DEVICE_FLOPPY ||
            disk->device == VIR_DOMAIN_DISK_DEVICE_CDROM) &&
           disk->tray_status == VIR_DOMAIN_DISK_TRAY_OPEN)) {
@@ -4130,6 +4216,11 @@ qemuBuildDriveStr(virConnectPtr conn,
     if (disk->blkdeviotune.size_iops_sec) {
         virBufferAsprintf(&opt, ",iops_size=%llu",
                           disk->blkdeviotune.size_iops_sec);
+    }
+
+    if (virStorageSourceIsContener(disk->src)) {
+        if (!qemuBuildContenerStr(conn, disk, disk->src, &opt, ""))
+            goto error;
     }
 
     if (virBufferCheckError(&opt) < 0)
