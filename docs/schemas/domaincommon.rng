@@ -1259,6 +1259,11 @@
         <ref name="positiveInteger"/>
       </attribute>
       <interleave>
+        <optional>
+          <attribute name="nodename">
+            <text/>
+          </attribute>
+        </optional>
         <ref name="diskSource"/>
         <ref name="diskBackingChain"/>
         <ref name="diskFormat"/>
