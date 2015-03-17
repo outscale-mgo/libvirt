@@ -88,6 +88,7 @@ virStorageBackendLogicalMakeVol(char **const groups,
     size_t i;
     int err, nextents, nvars, ret = -1;
     const char *attrs = groups[9];
+    virStorageSourcePtr backingStore;
 
     /* Skip inactive volume */
     if (attrs[4] != 'a')
@@ -151,11 +152,12 @@ virStorageBackendLogicalMakeVol(char **const groups,
         if (VIR_ALLOC(vol->target.backingStore) < 0)
             goto cleanup;
 
-        if (virAsprintf(&vol->target.backingStore->path, "%s/%s",
+        backingStore = virStorageSourceGetBackingStore(&vol->target, 0);
+        if (virAsprintf(&backingStore->path, "%s/%s",
                         pool->def->target.path, groups[1]) < 0)
             goto cleanup;
 
-        vol->target.backingStore->format = VIR_STORAGE_POOL_LOGICAL_LVM2;
+        backingStore->format = VIR_STORAGE_POOL_LOGICAL_LVM2;
     }
 
     if (!vol->key && VIR_STRDUP(vol->key, groups[2]) < 0)
@@ -852,6 +854,7 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
     virErrorPtr err;
     struct stat sb;
     bool created = false;
+    virStorageSourcePtr backingStore;
 
     if (vol->target.encryption != NULL) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
@@ -884,8 +887,9 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
     }
     virCommandAddArgFormat(cmd, "%lluK", VIR_DIV_UP(vol->target.capacity,
                                                     1024));
-    if (vol->target.backingStore)
-        virCommandAddArgList(cmd, "-s", vol->target.backingStore->path, NULL);
+    backingStore = virStorageSourceGetBackingStore(&vol->target, 0);
+    if (backingStore)
+        virCommandAddArgList(cmd, "-s", backingStore->path, NULL);
     else
         virCommandAddArg(cmd, pool->def->source.name);
 
