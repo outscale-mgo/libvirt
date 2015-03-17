@@ -1904,8 +1904,10 @@ virStorageSourceCopy(const virStorageSource *src,
         goto error;
 
     if (backingChain && virStorageSourceGetBackingStore(src, 0)) {
-        if (!(ret->backingStore = virStorageSourceCopy(virStorageSourceGetBackingStore(src, 0),
-                                                       true)))
+        if (virStorageSourceSetBackingStore(ret,
+                                            virStorageSourceCopy(virStorageSourceGetBackingStore(src, 0),
+                                                                 true),
+                                             0) < 0)
             goto error;
     }
 
@@ -2046,7 +2048,7 @@ virStorageSourceBackingStoreClear(virStorageSourcePtr def)
 
     /* recursively free backing chain */
     virStorageSourceFree(virStorageSourceGetBackingStore(def, 0));
-    def->backingStore = NULL;
+    ignore_value(virStorageSourceSetBackingStore(def, NULL, 0));
 }
 
 
