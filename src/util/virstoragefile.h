@@ -289,6 +289,10 @@ struct _virStorageSource {
 #  define DEV_BSIZE 512
 # endif
 
+int virStorageSourceSetBackingStore(virStorageSourcePtr src,
+                                    virStorageSourcePtr backingStore,
+                                    size_t pos);
+
 virStorageSourcePtr virStorageSourceGetBackingStore(const virStorageSource *src,
                                                     size_t pos);
 
