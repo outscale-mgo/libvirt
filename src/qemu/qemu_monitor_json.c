@@ -3679,11 +3679,14 @@ qemuMonitorJSONTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
     if (!cmd)
         goto cleanup;
 
+    VIR_ERROR("%s", virJSONValueToString(cmd, true));
     if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
         goto cleanup;
 
     ret = qemuMonitorJSONCheckError(cmd, reply);
-
+    if (ret < 0)
+        VIR_ERROR("a j'ai boum :((");
+    
  cleanup:
     virJSONValueFree(cmd);
     virJSONValueFree(reply);

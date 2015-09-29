@@ -294,6 +294,90 @@ struct _virStorageSource {
 #  define DEV_BSIZE 512
 # endif
 
+# ifndef BACKING_STORES_MAX_DEEP
+#  define BACKING_STORES_MAX_DEEP 12
+# endif
+
+typedef enum {
+    VIR_STORAGE_IT_NONE,
+    VIR_STORAGE_IT_NEED_CHANGE,
+    VIR_STORAGE_IT_FIRST_CALL,
+    VIR_STORAGE_IT_END
+} virStorageSourceIteratorSate;
+
+typedef struct _virStorageSourceIterator virStorageSourceIterator;
+typedef virStorageSourceIterator *virStorageSourceIteratorPtr;
+struct _virStorageSourceIterator
+{
+    size_t idx;
+    size_t deep;
+    virStorageSourceIteratorSate state;
+    size_t lastIdxs[BACKING_STORES_MAX_DEEP];
+    virStorageSourcePtr lasts[BACKING_STORES_MAX_DEEP];
+    virStorageSourcePtr father;
+};
+
+bool virStorageSourceIteratorIsEnd(virStorageSourceIteratorPtr data);
+
+
+void virStorageSourceIteratorIncrement(virStorageSourceIteratorPtr data);
+
+
+void virStorageSourceIteratorInit(virStorageSourceIteratorPtr data,
+                                 virStorageSourcePtr src1);
+
+
+/**
+ * virStorageSourceForeachSrcAdjuste
+ * return the child of @src at the same lvl than the src we
+ * are currentely iterating on.
+ *
+ * @src the father.
+ * @return the child
+ */
+virStorageSourcePtr virStorageSourceIteratorAligne(virStorageSourceIteratorPtr data,
+                                                   virStorageSourcePtr src);
+
+virStorageSourcePtr virStorageSourceIteratorGet(virStorageSourceIteratorPtr data);
+
+#define VIR_STORAGE_SRC_FOREACH_ALIGNED_SRC_SET_BC(bc1, bc2, data, src2) \
+    ((((bc1) = virStorageSourceIteratorGet(data)) || 1) &&                   \
+     (((bc2) = virStorageSourceIteratorAligne(data, src2)) || 1))
+
+/**
+ * FOREACH_ALIGNED_SRC:
+ * Iterate over 2 virStorageSourcePtr.
+ * This macors is usefull to get each src contain in @src1 and @src2 including
+ * themself.
+ * When using this macro you must be assure that @src1 and @src2 have the same tree,
+ * or you will get a SEGV
+ *
+ * @data: internal data used by the macro to work.
+ * must be of type virStorageSourceForeachSrcData
+ * @src1: The name of the 1rst virStorageSourcePtr on which you want to iterate.
+ * @src2: The name of the 2bd virStorageSourcePtr on which you want to iterate.
+ * @bc1: The name of the virStorageSourcePtr variable create to contain a child
+ * of @src1, the first @bc1 to get is actually @src1
+ * @bc2: same as @bc1 for @src2
+ * 
+ */
+#define VIR_STORAGE_SOURCE_FOREACH_ALIGNED(data, src1, src2, bc1, bc2)  \
+    virStorageSourceIteratorInit(&(data), src1);                        \
+    for (virStorageSourcePtr bc1 = NULL, bc2 = NULL;                    \
+         (!virStorageSourceIteratorIsEnd(&data) &&                      \
+          VIR_STORAGE_SRC_FOREACH_ALIGNED_SRC_SET_BC(bc1, bc2, &(data), src2)); \
+         virStorageSourceIteratorIncrement(&(data)))
+
+#define VIR_STORAGE_SOURCE_FOREACH(data, src, child)                    \
+    virStorageSourceIteratorInit(&(data), src);                         \
+    for (virStorageSourcePtr child = NULL;                              \
+         (!virStorageSourceIteratorIsEnd(&data) &&                      \
+          ((child = virStorageSourceIteratorGet(&(data))) || 1));       \
+         virStorageSourceIteratorIncrement(&(data)))
+
+
+bool virStorageSourceIsContener(virStorageSourcePtr src);
+
 bool virStorageSourceSetBackingStore(virStorageSourcePtr src,
                                      virStorageSourcePtr backingStore,
                                      size_t pos);

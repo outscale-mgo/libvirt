@@ -2965,9 +2965,11 @@ qemuDomainDetermineDiskChain(virQEMUDriverPtr driver,
     uid_t uid;
     gid_t gid;
 
+    VIR_ERROR("hej %p", disk->src);
     if (virStorageSourceIsEmpty(disk->src))
         goto cleanup;
 
+    VIR_ERROR(":)");
     if (virStorageSourceGetBackingStore(disk->src, 0)) {
         if (force_probe)
             virStorageSourceBackingStoreClear(disk->src);
@@ -2975,14 +2977,17 @@ qemuDomainDetermineDiskChain(virQEMUDriverPtr driver,
             goto cleanup;
     }
 
+    VIR_ERROR(":|");
     qemuDomainGetImageIds(cfg, vm, disk->src, &uid, &gid);
 
+    VIR_ERROR(":(");
     if (virStorageFileGetMetadata(disk->src,
                                   uid, gid,
                                   cfg->allowDiskFormatProbing,
                                   report_broken) < 0)
         ret = -1;
 
+    VIR_ERROR(":((");
  cleanup:
     virObjectUnref(cfg);
     return ret;

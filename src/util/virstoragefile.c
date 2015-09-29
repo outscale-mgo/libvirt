@@ -1809,6 +1809,120 @@ virStorageSourcePoolDefCopy(const virStorageSourcePoolDef *src)
     return NULL;
 }
 
+void virStorageSourceIteratorInit(virStorageSourceIteratorPtr data,
+                                  virStorageSourcePtr src)
+{
+    data->idx = 0;
+    data->deep = 0;
+    data->state = VIR_STORAGE_IT_FIRST_CALL;
+    data->father = src;
+}
+
+virStorageSourcePtr virStorageSourceIteratorAligne(virStorageSourceIteratorPtr data,
+                                                   virStorageSourcePtr src)
+{
+    int i;
+    virStorageSourcePtr cur = src;
+
+    if (!data || !src)
+        return NULL;
+    if (data->state == VIR_STORAGE_IT_FIRST_CALL)
+        return cur;
+    for (i = 0; i < data->deep; ++i) {
+        size_t idx = data->lastIdxs[i] - 1;
+
+        if (!cur->backingStores || !cur->backingStores[idx])
+            return NULL;
+        cur = cur->backingStores[idx];
+    }
+    return virStorageSourceGetBackingStore(cur, data->idx);
+}
+
+void virStorageSourceIteratorIncrement(virStorageSourceIteratorPtr data)
+{
+    if (virStorageSourceIteratorIsEnd(data))
+        return;
+
+    if (data->state == VIR_STORAGE_IT_FIRST_CALL) {
+        if (!virStorageSourceIsContener(data->father))
+            data->state = VIR_STORAGE_IT_END;
+        else
+            data->state = VIR_STORAGE_IT_NONE;
+        return;
+    }
+    /* We need to save the storageSource ptr and the index
+     * we're currentelly using, then set they child as current */
+   if (data->state == VIR_STORAGE_IT_NEED_CHANGE) {
+        data->state = VIR_STORAGE_IT_NONE;
+        data->lasts[data->deep] = data->father;
+        /* in the last iteration we had incremente data->idx */
+        data->lastIdxs[data->deep] = data->idx;
+        data->father = virStorageSourceGetBackingStore(data->father,
+                                                       data->idx - 1);
+        data->deep += 1;
+        data->idx = 0;
+        return;
+    }
+
+   /* If this condition is true, when we hav iterate over all
+     * the cild at this level, if deep is equal to 0, we need to exit the loop
+     * otherwise we need to restore*/
+   if ((data->idx + 1) >= (data->father->nBackingStores)) {
+       if (data->deep == 0) {
+           data->state = VIR_STORAGE_IT_END;
+           return;
+       }
+       data->deep -= 1;
+       data->father = data->lasts[data->deep];
+       data->idx = data->lastIdxs[data->deep];
+       return;
+   }
+
+   if (virStorageSourceIsContener(virStorageSourceGetBackingStore(data->father,
+                                                                  data->idx)))
+       data->state = VIR_STORAGE_IT_NEED_CHANGE;
+   data->idx += 1;
+}
+
+virStorageSourcePtr virStorageSourceIteratorGet(virStorageSourceIteratorPtr data)
+{
+    if (data->state == VIR_STORAGE_IT_FIRST_CALL)
+        return data->father;
+    return virStorageSourceGetBackingStore(data->father, data->idx);
+}
+
+bool virStorageSourceIteratorIsEnd(virStorageSourceIteratorPtr data)
+{
+    return data->state == VIR_STORAGE_IT_END;
+}
+
+/**
+ * virStorageSourceIsContener:
+ * return true if the backingStores field inside @src is use
+ * as a child of a contener
+ */
+bool virStorageSourceIsContener(virStorageSourcePtr src)
+{
+    virStorageType type;
+
+    if (!src)
+        return false;
+    type = virStorageSourceGetActualType(src);
+    switch (type) {
+    case VIR_STORAGE_TYPE_NONE:
+    case VIR_STORAGE_TYPE_FILE:
+    case VIR_STORAGE_TYPE_BLOCK:
+    case VIR_STORAGE_TYPE_DIR:
+    case VIR_STORAGE_TYPE_NETWORK:
+    case VIR_STORAGE_TYPE_VOLUME:
+    case VIR_STORAGE_TYPE_LAST:
+        return false;
+
+    case VIR_STORAGE_TYPE_QUORUM:
+        return true;
+    }
+    return false;
+}
 
 /**
  * virStorageSourceGetBackingStore:
@@ -1979,16 +2093,20 @@ virStorageSourceInitChainElement(virStorageSourcePtr newelem,
 {
     int ret = -1;
 
+    VIR_ERROR("1");
     if (transferLabels &&
         !newelem->seclabels &&
         virStorageSourceSeclabelsCopy(newelem, old) < 0)
         goto cleanup;
 
+    VIR_ERROR("%p -2- %p", newelem, old);
     if (!newelem->driverName &&
         VIR_STRDUP(newelem->driverName, old->driverName) < 0)
         goto cleanup;
+    VIR_ERROR("3");
 
     newelem->shared = old->shared;
+    VIR_ERROR("daitarn 3");
     newelem->readonly = old->readonly;
 
     ret = 0;

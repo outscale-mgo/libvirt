@@ -439,6 +439,58 @@ disksorter(const void *a, const void *b)
     return diska->idx - diskb->idx;
 }
 
+static int asignVirStorageSourcePaths(const char *original,
+                                      const char *def_name,
+                                      const char *disk_name,
+                                      virStorageSourcePtr disk_src)
+{
+    const char *tmp;
+    struct stat sb;
+
+    if (disk_src->type != VIR_STORAGE_TYPE_FILE) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("cannot generate external snapshot name "
+                         "for disk '%s' on a '%s' device"),
+                       disk_name,
+                       virStorageTypeToString(disk_src->type));
+        return -1;
+    }
+
+    if (!original) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("cannot generate external snapshot name "
+                         "for disk '%s' without source"),
+                       disk_name);
+        return -1;
+    }
+    if (stat(original, &sb) < 0 || !S_ISREG(sb.st_mode)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("source for disk '%s' is not a regular "
+                         "file; refusing to generate external "
+                         "snapshot name"),
+                       disk_name);
+        return -1;
+    }
+
+    tmp = strrchr(original, '.');
+    if (!tmp || strchr(tmp, '/')) {
+        if (virAsprintf(&disk_src->path, "%s.%s", original,
+                        def_name) < 0)
+            return -1;
+    } else {
+        if ((tmp - original) > INT_MAX) {
+            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                           _("integer overflow"));
+            return -1;
+        }
+        if (virAsprintf(&disk_src->path, "%.*s.%s",
+                        (int) (tmp - original), original,
+                        def_name) < 0)
+            return -1;
+    }
+    return 0;
+}
+
 /* Align def->disks to def->domain.  Sort the list of def->disks,
  * filling in any missing disks or snapshot state defaults given by
  * the domain, with a fallback to a passed in default.  Convert paths
@@ -454,8 +506,9 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     int ret = -1;
     virBitmapPtr map = NULL;
     size_t i;
-    int ndisks;
 
+
+    VIR_ERROR("API complet, can you work :) ?");
     if (!def->dom) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing domain in snapshot"));
@@ -534,17 +587,18 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     }
 
     /* Provide defaults for all remaining disks.  */
-    ndisks = def->ndisks;
     if (VIR_EXPAND_N(def->disks, def->ndisks,
                      def->dom->ndisks - def->ndisks) < 0)
         goto cleanup;
 
-    for (i = 0; i < def->dom->ndisks; i++) {
+    for (i = 0 ; i <  def->dom->ndisks; i++) {
         virDomainSnapshotDiskDefPtr disk;
+        virStorageSourceIterator data;
 
-        if (virBitmapIsBitSet(map, i))
+        if (virBitmapIsBitSet(map, i)) {
             continue;
-        disk = &def->disks[ndisks++];
+        }
+        disk = &def->disks[i];
         if (VIR_ALLOC(disk->src) < 0)
             goto cleanup;
         if (VIR_STRDUP(disk->name, def->dom->disks[i]->dst) < 0)
@@ -552,12 +606,31 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
         disk->idx = i;
 
         /* Don't snapshot empty drives */
-        if (virStorageSourceIsEmpty(def->dom->disks[i]->src))
+        if (virStorageSourceIsEmpty(def->dom->disks[i]->src) &&
+            !virStorageSourceIsContener(def->dom->disks[i]->src))
             disk->snapshot = VIR_DOMAIN_SNAPSHOT_LOCATION_NONE;
         else
             disk->snapshot = def->dom->disks[i]->snapshot;
 
-        disk->src->type = VIR_STORAGE_TYPE_FILE;
+        VIR_STORAGE_SOURCE_FOREACH_ALIGNED(data, def->dom->disks[i]->src,
+                                           disk->src, bcOrig, bcSnap) {
+            int j;
+            virStorageSourcePtr tmp;
+            VIR_ERROR("i got a fly machine"); 
+            /* Allocate childs for this child */
+            if (virStorageSourceIsContener(bcOrig)) {
+                /* For now ther's only quorum, but what about tomorrow */
+                bcSnap->type = bcOrig->type;
+                for (j = 0; j < bcOrig->nBackingStores; ++j) {
+                    if (VIR_ALLOC(tmp) < 0)
+                        goto cleanup;
+                    virStorageSourceSetBackingStore(bcSnap, tmp, j);
+                }
+            } else {
+                VIR_ERROR("%s", bcOrig->path);
+                bcSnap->type = VIR_STORAGE_TYPE_FILE;
+            }
+        }
         if (!disk->snapshot)
             disk->snapshot = default_snapshot;
     }
@@ -568,53 +641,21 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
      * backing file is a regular file.  */
     for (i = 0; i < def->ndisks; i++) {
         virDomainSnapshotDiskDefPtr disk = &def->disks[i];
+        virStorageSourceIterator data;
 
+        VIR_ERROR("looping inside");
         if (disk->snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL &&
             !disk->src->path) {
-            const char *original = virDomainDiskGetSource(def->dom->disks[i]);
-            const char *tmp;
-            struct stat sb;
 
-            if (disk->src->type != VIR_STORAGE_TYPE_FILE) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("cannot generate external snapshot name "
-                                 "for disk '%s' on a '%s' device"),
-                               disk->name,
-                               virStorageTypeToString(disk->src->type));
-                goto cleanup;
-            }
-
-            if (!original) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("cannot generate external snapshot name "
-                                 "for disk '%s' without source"),
-                               disk->name);
-                goto cleanup;
-            }
-            if (stat(original, &sb) < 0 || !S_ISREG(sb.st_mode)) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("source for disk '%s' is not a regular "
-                                 "file; refusing to generate external "
-                                 "snapshot name"),
-                               disk->name);
-                goto cleanup;
-            }
-
-            tmp = strrchr(original, '.');
-            if (!tmp || strchr(tmp, '/')) {
-                if (virAsprintf(&disk->src->path, "%s.%s", original,
-                                def->name) < 0)
-                    goto cleanup;
-            } else {
-                if ((tmp - original) > INT_MAX) {
-                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                                   _("integer overflow"));
-                    goto cleanup;
+            VIR_STORAGE_SOURCE_FOREACH_ALIGNED(data, def->dom->disks[i]->src,
+                                               disk->src,
+                                               bc, bc2) {
+                if (bc2->type == VIR_STORAGE_TYPE_FILE) {
+                    if (asignVirStorageSourcePaths(bc->path, def->name, disk->name,
+                                                   bc2) < 0)
+                        goto cleanup;
+                    VIR_ERROR("src: %s", bc2->path);
                 }
-                if (virAsprintf(&disk->src->path, "%.*s.%s",
-                                (int) (tmp - original), original,
-                                def->name) < 0)
-                    goto cleanup;
             }
         }
     }

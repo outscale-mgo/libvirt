@@ -18768,6 +18768,7 @@ virDomainDiskSourceFormatInternal(virBufferPtr buf,
     if (policy)
         startupPolicy = virDomainStartupPolicyTypeToString(policy);
 
+    VIR_ERROR("src: %s, %d", src->path, src->type);
     if (src->path || src->nhosts > 0 || src->srcpool || startupPolicy) {
         switch ((virStorageType)src->type) {
         case VIR_STORAGE_TYPE_FILE:
