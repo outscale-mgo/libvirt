@@ -290,6 +290,52 @@ struct _virStorageSource {
 #  define DEV_BSIZE 512
 # endif
 
+# ifndef BACKING_STORES_MAX_DEEP
+#  define BACKING_STORES_MAX_DEEP 12
+# endif
+
+typedef enum {
+    VIR_STORAGE_IT_NONE,
+    VIR_STORAGE_IT_NEED_CHANGE,
+    VIR_STORAGE_IT_FIRST_CALL,
+    VIR_STORAGE_IT_END
+} virStorageSourceIteratorSate;
+
+typedef struct _virStorageSourceIterator virStorageSourceIterator;
+typedef virStorageSourceIterator *virStorageSourceIteratorPtr;
+struct _virStorageSourceIterator
+{
+    size_t idx;
+    size_t deep;
+    virStorageSourceIteratorSate state;
+    size_t lastIdxs[BACKING_STORES_MAX_DEEP];
+    virStorageSourcePtr lasts[BACKING_STORES_MAX_DEEP];
+    virStorageSourcePtr father;
+};
+
+bool virStorageSourceIteratorIsEnd(virStorageSourceIteratorPtr data);
+
+
+void virStorageSourceIteratorIncrement(virStorageSourceIteratorPtr data);
+
+
+void virStorageSourceIteratorInit(virStorageSourceIteratorPtr data,
+                                 virStorageSourcePtr src1);
+
+
+/**
+ * virStorageSourceForeachSrcAdjuste
+ * return the child of @src at the same lvl than the src we
+ * are currentely iterating on.
+ *
+ * @src the father.
+ * @return the child
+ */
+virStorageSourcePtr virStorageSourceIteratorAligne(virStorageSourceIteratorPtr data,
+                                                   virStorageSourcePtr src);
+
+virStorageSourcePtr virStorageSourceIteratorGet(virStorageSourceIteratorPtr data);
+
 bool virStorageSourceIsContener(virStorageSourcePtr src);
 
 bool virStorageSourceSetBackingStore(virStorageSourcePtr src,
