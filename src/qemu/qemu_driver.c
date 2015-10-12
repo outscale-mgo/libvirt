@@ -13886,6 +13886,9 @@ qemuDomainSnapshotPrepareDiskExternalOverlayInactive(virDomainSnapshotDiskDefPtr
     return 0;
 }
 
+#define CLEAN_AND_RET(snapchild)                \
+    virStorageFileDeinit(snapchild);            \
+    return -1;
 
 static int
 qemuDomainSnapshotPrepareDiskExternal(virConnectPtr conn,
@@ -13894,8 +13897,8 @@ qemuDomainSnapshotPrepareDiskExternal(virConnectPtr conn,
                                       bool active,
                                       bool reuse)
 {
-    int ret = -1;
     struct stat st;
+    virStorageSourceIterator data;
 
     if (qemuTranslateSnapshotDiskSourcePool(conn, snapdisk) < 0)
         return -1;
@@ -13917,36 +13920,39 @@ qemuDomainSnapshotPrepareDiskExternal(virConnectPtr conn,
             return -1;
     }
 
-    if (virStorageFileInit(snapdisk->src) < 0)
-        return -1;
+    VIR_STORAGE_SOURCE_FOREACH(data, snapdisk->src, snapchild) {
 
-    if (virStorageFileStat(snapdisk->src, &st) < 0) {
-        if (errno != ENOENT) {
-            virReportSystemError(errno,
-                                 _("unable to stat for disk %s: %s"),
-                                 snapdisk->name, snapdisk->src->path);
-            goto cleanup;
-        } else if (reuse) {
-            virReportSystemError(errno,
-                                 _("missing existing file for disk %s: %s"),
-                                 snapdisk->name, snapdisk->src->path);
-            goto cleanup;
+    if (virStorageSourceIsContener(snapchild))
+        continue;
+
+    if (virStorageFileInit(snapchild) < 0)
+            return -1;
+
+        if (virStorageFileStat(snapchild, &st) < 0) {
+            if (errno != ENOENT) {
+                virReportSystemError(errno,
+                                     _("unable to stat for disk %s: %s"),
+                                     snapdisk->name, snapdisk->src->path);
+                CLEAN_AND_RET(snapchild);
+            } else if (reuse) {
+                virReportSystemError(errno,
+                                     _("missing existing file for disk %s: %s"),
+                                     snapdisk->name, snapdisk->src->path);
+                CLEAN_AND_RET(snapchild);
+            }
+        } else if (!S_ISBLK(st.st_mode) && st.st_size && !reuse) {
+            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                           _("external snapshot file for disk %s already "
+                             "exists and is not a block device: %s"),
+                           snapdisk->name, snapdisk->src->path);
+            CLEAN_AND_RET(snapchild);
         }
-    } else if (!S_ISBLK(st.st_mode) && st.st_size && !reuse) {
-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                       _("external snapshot file for disk %s already "
-                         "exists and is not a block device: %s"),
-                       snapdisk->name, snapdisk->src->path);
-        goto cleanup;
+        virStorageFileDeinit(snapchild);
     }
-
-    ret = 0;
-
- cleanup:
-    virStorageFileDeinit(snapdisk->src);
-    return ret;
+    return 0;
 }
 
+#undef CLEAN_AND_RET
 
 static int
 qemuDomainSnapshotPrepareDiskInternal(virConnectPtr conn,
@@ -14021,6 +14027,7 @@ qemuDomainSnapshotPrepare(virConnectPtr conn,
     bool forbid_internal = false;
     int external = 0;
     qemuDomainObjPrivatePtr priv = vm->privateData;
+    virStorageSourceIterator data;
 
     if (def->state == VIR_DOMAIN_DISK_SNAPSHOT &&
         reuse && !virQEMUCapsGet(priv->qemuCaps, QEMU_CAPS_TRANSACTION)) {
@@ -14041,66 +14048,78 @@ qemuDomainSnapshotPrepare(virConnectPtr conn,
                            disk->name);
             goto cleanup;
         }
+        VIR_STORAGE_SOURCE_FOREACH_ALIGNED(data, dom_disk->src, disk->src,
+                            domchild, snapchild) {
 
-        switch ((virDomainSnapshotLocation) disk->snapshot) {
-        case VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL:
-            found_internal = true;
+            VIR_ERROR("b %s", domchild->path);
+            VIR_ERROR("b-f1 %s", virStorageFileFormatTypeToString(domchild->format));
+            VIR_ERROR("b-f2 %s", virStorageFileFormatTypeToString(snapchild->format));
+            VIR_ERROR("c %lu", snapchild->nBackingStores);
+            if (virStorageSourceIsContener(domchild)) {
+                continue;
+            }
+            switch ((virDomainSnapshotLocation) disk->snapshot) {
+            case VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL:
+                found_internal = true;
 
-            if (def->state == VIR_DOMAIN_DISK_SNAPSHOT && active) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("active qemu domains require external disk "
-                                 "snapshots; disk %s requested internal"),
-                               disk->name);
+                if (def->state == VIR_DOMAIN_DISK_SNAPSHOT && active) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                   _("active qemu domains require external disk "
+                                     "snapshots; disk %s requested internal"),
+                                   disk->name);
+                    goto cleanup;
+                }
+
+                if (qemuDomainSnapshotPrepareDiskInternal(conn, dom_disk,
+                                                          active) < 0)
+                    goto cleanup;
+
+                if (domchild->format > 0 &&
+                    domchild->format != VIR_STORAGE_FILE_QCOW2) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                   _("internal snapshot for disk %s unsupported "
+                                     "for storage type %s"),
+                                   disk->name,
+                                   virStorageFileFormatTypeToString(
+                                       domchild->format));
+                    goto cleanup;
+                }
+                break;
+
+            case VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL:
+                if (!snapchild->format) {
+                    snapchild->format = VIR_STORAGE_FILE_QCOW2;
+                } else if (snapchild->format != VIR_STORAGE_FILE_QCOW2 &&
+                           snapchild->format != VIR_STORAGE_FILE_QED) {
+                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                   _("external snapshot format for disk %s "
+                                     "is unsupported: %s"),
+                                   disk->name,
+                                   virStorageFileFormatTypeToString(snapchild->format));
+                    goto cleanup;
+                }
+
+                if (qemuDomainSnapshotPrepareDiskExternal(conn, dom_disk, disk,
+                                                          active, reuse) < 0)
+                    goto cleanup;
+
+                external++;
+                VIR_ERROR("hello %s\n%s\n%s", domchild->path,
+                          snapchild->path, disk->name);
+                break;
+
+            case VIR_DOMAIN_SNAPSHOT_LOCATION_NONE:
+                /* Remember seeing a disk that has snapshot disabled */
+                if (!domchild->readonly)
+                    forbid_internal = true;
+                break;
+
+            case VIR_DOMAIN_SNAPSHOT_LOCATION_DEFAULT:
+            case VIR_DOMAIN_SNAPSHOT_LOCATION_LAST:
+                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                               _("unexpected code path"));
                 goto cleanup;
             }
-
-            if (qemuDomainSnapshotPrepareDiskInternal(conn, dom_disk,
-                                                      active) < 0)
-                goto cleanup;
-
-            if (vm->def->disks[i]->src->format > 0 &&
-                vm->def->disks[i]->src->format != VIR_STORAGE_FILE_QCOW2) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("internal snapshot for disk %s unsupported "
-                                 "for storage type %s"),
-                               disk->name,
-                               virStorageFileFormatTypeToString(
-                                   vm->def->disks[i]->src->format));
-                goto cleanup;
-            }
-            break;
-
-        case VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL:
-            if (!disk->src->format) {
-                disk->src->format = VIR_STORAGE_FILE_QCOW2;
-            } else if (disk->src->format != VIR_STORAGE_FILE_QCOW2 &&
-                       disk->src->format != VIR_STORAGE_FILE_QED) {
-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
-                               _("external snapshot format for disk %s "
-                                 "is unsupported: %s"),
-                               disk->name,
-                               virStorageFileFormatTypeToString(disk->src->format));
-                goto cleanup;
-            }
-
-            if (qemuDomainSnapshotPrepareDiskExternal(conn, dom_disk, disk,
-                                                      active, reuse) < 0)
-                goto cleanup;
-
-            external++;
-            break;
-
-        case VIR_DOMAIN_SNAPSHOT_LOCATION_NONE:
-            /* Remember seeing a disk that has snapshot disabled */
-            if (!dom_disk->src->readonly)
-                forbid_internal = true;
-            break;
-
-        case VIR_DOMAIN_SNAPSHOT_LOCATION_DEFAULT:
-        case VIR_DOMAIN_SNAPSHOT_LOCATION_LAST:
-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
-                           _("unexpected code path"));
-            goto cleanup;
         }
     }
 
@@ -14157,6 +14176,7 @@ qemuDomainSnapshotPrepare(virConnectPtr conn,
         }
     }
 
+    VIR_ERROR("happy end for now :)");
     ret = 0;
 
  cleanup:
