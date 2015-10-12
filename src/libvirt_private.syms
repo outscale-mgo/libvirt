@@ -2202,6 +2202,7 @@ virStorageSourceGetSecurityLabelDef;
 virStorageSourceInitChainElement;
 virStorageSourceIsEmpty;
 virStorageSourceIsLocalStorage;
+virStorageSourceIsRAID;
 virStorageSourceNewFromBacking;
 virStorageSourceParseRBDColonString;
 virStorageSourcePoolDefFree;

@@ -1808,6 +1808,33 @@ virStorageSourcePoolDefCopy(const virStorageSourcePoolDef *src)
     return NULL;
 }
 
+/**
+ * virStorageSourceIsRAID:
+ * return true if the backingStores field inside @src is use
+ * as a child of a contener
+ */
+bool virStorageSourceIsRAID(virStorageSourcePtr src)
+{
+    virStorageType type;
+
+    if (!src)
+        return false;
+    type = virStorageSourceGetActualType(src);
+    switch (type) {
+    case VIR_STORAGE_TYPE_NONE:
+    case VIR_STORAGE_TYPE_FILE:
+    case VIR_STORAGE_TYPE_BLOCK:
+    case VIR_STORAGE_TYPE_DIR:
+    case VIR_STORAGE_TYPE_NETWORK:
+    case VIR_STORAGE_TYPE_VOLUME:
+    case VIR_STORAGE_TYPE_LAST:
+        return false;
+
+    case VIR_STORAGE_TYPE_QUORUM:
+        return true;
+    }
+    return false;
+}
 
 /**
  * virStorageSourceGetBackingStore:
