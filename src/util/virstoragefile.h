@@ -339,6 +339,42 @@ virStorageSourcePtr virStorageSourceIteratorAligne(virStorageSourceIteratorPtr d
 
 virStorageSourcePtr virStorageSourceIteratorGet(virStorageSourceIteratorPtr data);
 
+#define VIR_STORAGE_SRC_FOREACH_ALIGNED_SRC_SET_CHILDS(child1, child2, data, src2) \
+    ((((child1) = virStorageSourceIteratorGet(data)) || 1) &&           \
+     (((child2) = virStorageSourceIteratorAligne(data, src2)) || 1))
+
+/**
+ * VIR_STORAGE_SOURCE_FOREACH_ALIGNED:
+ * Iterate over 2 virStorageSourcePtr.
+ * This macors is usefull to get each src contain in @src1 and @src2 including
+ * themself.
+ * When using this macro you must be assure that @src1 and @src2 have the same tree,
+ * or you may get a SEGV
+ *
+ * @data: internal data used by the macro to work.
+ * must be of type virStorageSourceIterator.
+ * @src1: The name of the 1rst virStorageSourcePtr on which you want to iterate.
+ * @src2: The name of the 2nd virStorageSourcePtr on which you want to iterate.
+ * @child1: The name of the virStorageSourcePtr variable create to contain a child
+ * of @src1, the first @child1 you'll get is actually @src1
+ * @child2: same as @child1 for @src2
+ * 
+ */
+#define VIR_STORAGE_SOURCE_FOREACH_ALIGNED(data, src1, src2, child1, child2) \
+    virStorageSourceIteratorInit(&(data), src1);                        \
+    for (virStorageSourcePtr child1 = NULL, child2 = NULL;              \
+         (!virStorageSourceIteratorIsEnd(&data) &&                      \
+          VIR_STORAGE_SRC_FOREACH_ALIGNED_SRC_SET_CHILDS(child1, child2, &(data), src2)); \
+         virStorageSourceIteratorIncrement(&(data)))
+
+#define VIR_STORAGE_SOURCE_FOREACH(data, src, child)                    \
+    virStorageSourceIteratorInit(&(data), src);                         \
+    for (virStorageSourcePtr child = NULL;                              \
+         (!virStorageSourceIteratorIsEnd(&data) &&                      \
+          ((child = virStorageSourceIteratorGet(&(data))) || 1));       \
+         virStorageSourceIteratorIncrement(&(data)))
+
+
 bool virStorageSourceIsContener(virStorageSourcePtr src);
 
 bool virStorageSourceSetBackingStore(virStorageSourcePtr src,
