@@ -507,6 +507,8 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
     virBitmapPtr map = NULL;
     size_t i;
 
+
+    VIR_ERROR("API complet, can you work :) ?");
     if (!def->dom) {
         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
                        _("missing domain in snapshot"));

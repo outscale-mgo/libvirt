@@ -2090,16 +2090,20 @@ virStorageSourceInitChainElement(virStorageSourcePtr newelem,
 {
     int ret = -1;
 
+    VIR_ERROR("1");
     if (transferLabels &&
         !newelem->seclabels &&
         virStorageSourceSeclabelsCopy(newelem, old) < 0)
         goto cleanup;
 
+    VIR_ERROR("%p -2- %p", newelem, old);
     if (!newelem->driverName &&
         VIR_STRDUP(newelem->driverName, old->driverName) < 0)
         goto cleanup;
+    VIR_ERROR("3");
 
     newelem->shared = old->shared;
+    VIR_ERROR("daitarn 3");
     newelem->readonly = old->readonly;
 
     ret = 0;
