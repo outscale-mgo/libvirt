@@ -321,6 +321,14 @@ bool virStorageSourceIteratorIsEnd(virStorageSourceIteratorPtr data);
 
 void virStorageSourceIteratorIncrement(virStorageSourceIteratorPtr data);
 
+static inline void virStorageSourceIteratorAdvance(virStorageSourceIteratorPtr data,
+                                                   size_t idx)
+{
+    for (size_t i = 0;
+         i < idx && !virStorageSourceIteratorIsEnd(data);
+         ++i)
+        virStorageSourceIteratorIncrement(data);
+}
 
 void virStorageSourceIteratorInit(virStorageSourceIteratorPtr data,
                                  virStorageSourcePtr src1);
