@@ -2672,6 +2672,9 @@ int qemuMonitorTextCreateSnapshot(qemuMonitorPtr mon, const char *name)
              && strstr(reply, "while writing VM") != NULL) {
         virReportError(VIR_ERR_OPERATION_FAILED, "%s", reply);
         goto cleanup;
+    } else if (strstr(reply, "but does not support snapshots") != NULL) {
+        virReportError(VIR_ERR_OPERATION_INVALID, "%s", reply);
+        goto cleanup;
     }
 
     ret = 0;

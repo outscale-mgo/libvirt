@@ -17074,6 +17074,12 @@ qemuDomainBlockCommit(virDomainPtr dom,
         goto endjob;
     disk = vm->def->disks[idx];
 
+    if (virStorageSourceIsContener(disk->src)) {
+        virReportError(VIR_ERR_INTERNAL_ERROR,
+                       _("blockcommit are not supported on '%s' disks"),
+                       virStorageTypeToString(virStorageSourceGetActualType(disk->src)));
+        goto endjob;
+    }
     if (!disk->src->path) {
         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
                        _("disk %s has no source file to be committed"),
