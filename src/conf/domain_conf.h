@@ -2582,6 +2582,7 @@ void virDomainDefClearPCIAddresses(virDomainDefPtr def);
 void virDomainDefClearCCWAddresses(virDomainDefPtr def);
 void virDomainDefClearDeviceAliases(virDomainDefPtr def);
 void virDomainTPMDefFree(virDomainTPMDefPtr def);
+bool virDomainDefHasRAID(virDomainDefPtr def);
 
 typedef int (*virDomainDeviceInfoCallback)(virDomainDefPtr def,
                                            virDomainDeviceDefPtr dev,

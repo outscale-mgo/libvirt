@@ -2687,6 +2687,19 @@ virDomainDefNewFull(const char *name,
 }
 
 
+bool
+virDomainDefHasRAID(virDomainDefPtr def)
+{
+    size_t i;
+
+    for (i = 0; i < def->ndisks; ++i) {
+        if (virStorageSourceIsRAID(def->disks[i]->src))
+            return true;
+    }
+    return true;
+}
+
+
 void virDomainObjAssignDef(virDomainObjPtr domain,
                            virDomainDefPtr def,
                            bool live,

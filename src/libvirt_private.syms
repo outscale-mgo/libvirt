@@ -220,6 +220,7 @@ virDomainDefGetVcpus;
 virDomainDefGetVcpusMax;
 virDomainDefHasDeviceAddress;
 virDomainDefHasMemoryHotplug;
+virDomainDefHasRAID;
 virDomainDefHasVcpusOffline;
 virDomainDefMaybeAddController;
 virDomainDefMaybeAddInput;
