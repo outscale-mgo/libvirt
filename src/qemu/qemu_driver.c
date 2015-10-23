@@ -14654,6 +14654,12 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
+    if (virDomainDefHasRAID(vm->def)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("Snapshot does not support domain with RAID(like quorum) yet"));
+        goto cleanup;
+    }
+
     if (qemuProcessAutoDestroyActive(driver, vm)) {
         virReportError(VIR_ERR_OPERATION_INVALID,
                        "%s", _("domain is marked for auto destroy"));
@@ -16269,6 +16275,13 @@ qemuDomainBlockPullCommon(virQEMUDriverPtr driver,
         goto endjob;
     disk = vm->def->disks[idx];
 
+    if (virStorageSourceIsRAID(disk->src)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("block pull is not yet supported with disk of format '%s'"),
+                       virStorageFileFormatTypeToString(disk->src->format));
+        goto endjob;
+    }
+
     if (qemuDomainDiskBlockJobIsActive(disk))
         goto endjob;
 
@@ -16379,6 +16392,13 @@ qemuDomainBlockJobAbort(virDomainPtr dom,
     if (!(device = qemuDiskPathToAlias(vm, path, &idx)))
         goto endjob;
     disk = vm->def->disks[idx];
+
+    if (virStorageSourceIsRAID(disk->src)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("block job is not yes supported with disk of format '%s'"),
+                       virStorageFileFormatTypeToString(disk->src->format));
+        goto endjob;
+    }
 
     if (disk->mirrorState != VIR_DOMAIN_DISK_MIRROR_STATE_NONE &&
         disk->mirrorState != VIR_DOMAIN_DISK_MIRROR_STATE_READY) {
@@ -16672,6 +16692,14 @@ qemuDomainBlockCopyCommon(virDomainObjPtr vm,
                        _("block copy is not supported with this QEMU binary"));
         goto endjob;
     }
+
+    if (virStorageSourceIsRAID(disk->src)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                       _("block copy is not yet supported with disk of format '%s'"),
+                       virStorageFileFormatTypeToString(disk->src->format));
+        goto endjob;
+    }
+
     if (vm->persistent) {
         /* XXX if qemu ever lets us start a new domain with mirroring
          * already active, we can relax this; but for now, the risk of
