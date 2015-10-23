@@ -1541,6 +1541,19 @@ virDomainDiskSetFormat(virDomainDiskDefPtr def, int format)
 }
 
 
+bool
+virDomainDefHasContenerDisk(virDomainDefPtr def)
+{
+    size_t i;
+
+    for (i = 0; i < def->ndisks; ++i) {
+        if (virStorageSourceIsContener(def->disks[i]->src))
+            return true;
+    }
+    return true;
+}
+
+
 static virDomainControllerDefPtr
 virDomainControllerDefNew(virDomainControllerType type)
 {

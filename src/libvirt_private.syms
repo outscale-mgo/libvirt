@@ -216,6 +216,7 @@ virDomainDefGetDefaultEmulator;
 virDomainDefGetMemoryActual;
 virDomainDefGetMemoryInitial;
 virDomainDefGetSecurityLabelDef;
+virDomainDefHasContenerDisk;
 virDomainDefHasDeviceAddress;
 virDomainDefHasMemoryHotplug;
 virDomainDefMaybeAddController;
