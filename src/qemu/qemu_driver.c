@@ -14674,6 +14674,12 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
         goto cleanup;
 
+    if (virDomainDefHasContenerDisk(vm->def)) {
+        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                       _("Snapshot does not support contener(quorum) yet"));
+        goto cleanup;
+    }
+
     if (qemuProcessAutoDestroyActive(driver, vm)) {
         virReportError(VIR_ERR_OPERATION_INVALID,
                        "%s", _("domain is marked for auto destroy"));
