@@ -11803,7 +11803,8 @@ qemuDomainGetBlockInfo(virDomainPtr dom,
         goto endjob;
     }
 
-    if (virStorageSourceIsEmpty(disk->src)) {
+    if (!virStorageSourceIsRAID(disk->src) &&
+        virStorageSourceIsEmpty(disk->src)) {
         virReportError(VIR_ERR_INVALID_ARG,
                        _("disk '%s' does not currently have a source assigned"),
                        path);
