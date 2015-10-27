@@ -16095,7 +16095,7 @@ qemuDiskPathToAlias(virDomainObjPtr vm, const char *path, int *idxret)
     if (idxret)
         *idxret = idx;
 
-    if (virDomainDiskGetSource(disk)) {
+    if (virDomainDiskGetSource(disk) || virStorageSourceIsRAID(disk->src)) {
         if (virAsprintf(&ret, "drive-%s", disk->info.alias) < 0)
             return NULL;
     }
